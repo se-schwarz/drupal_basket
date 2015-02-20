@@ -1,0 +1,320 @@
+<?php
+
+define('BASKET_SESSION_VARIABLE', 'basket');
+define('BASKET_ADD_URL', 'basket/add');
+define('BASKET_REMOVE_URL', 'basket/remove');
+define('BASKET_UPDATE_URL', 'basket/update');
+define('BASKET_CLEAR_URL', 'basket/clear');
+
+require_once(dirname(__FILE__) . '/includes/basket.pages.inc');
+require_once(dirname(__FILE__) . '/includes/basket.inc');
+
+/**
+ * Implements hook_permission.
+ */
+function basket_permission() {
+  $permission = array(
+    'access basket' => array(
+      'title' => t('Access the basket main page')
+    ),
+    'use basket' => array(
+      'title' => t('Add and remove items from own basket')
+    )
+  );
+  return $permission;
+}
+
+/**
+ * Implements hook_menu().
+ */
+function basket_menu() {
+  $items = array();
+  $items['basket'] = array(
+    'title' => 'Basket',
+    'page callback' => 'basket_page',
+    'access arguments' => array('access basket'),
+    'type' => MENU_CALLBACK,
+    'file' => 'includes/basket.pages.inc',
+  );
+  $items[BASKET_ADD_URL] = array(
+    'title' => 'Basket add',
+    'page callback' => 'basket_add_view',
+    'access arguments' => array('use basket'),
+    'type' => MENU_CALLBACK,
+  );
+  $items[BASKET_REMOVE_URL] = array(
+    'title' => 'Basket remove',
+    'page callback' => 'basket_remove_view',
+    'access arguments' => array('use basket'),
+    'type' => MENU_CALLBACK,
+  );
+  $items[BASKET_UPDATE_URL] = array(
+    'title' => 'Basket update',
+    'page callback' => 'basket_update_view',
+    'access arguments' => array('use basket'),
+    'type' => MENU_CALLBACK,
+  );
+  $items[BASKET_CLEAR_URL] = array(
+    'title' => 'Basket clear',
+    'page callback' => 'basket_clear_view',
+    'access arguments' => array('use basket'),
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_theme().
+ * @return array
+ */
+function basket_theme() {
+  return array(
+    'basket_items' => array(
+      'path' => drupal_get_path('module', 'basket') . '/templates',
+      'template' => 'basket-item-list',
+      'variables' => array('basket' => null, 'item_markup' => null),
+    ),
+    'basket_item' => array(
+      'path' => drupal_get_path('module', 'basket') . '/templates',
+      'pattern' => 'basket_item__',
+      'template' => 'basket-item',
+      'variables' => array('item' => null),
+    ),
+    'block_basket' => array(
+      'path' => drupal_get_path('module', 'basket') . '/templates',
+      'template' => 'block-basket',
+      'variables' => array('basket' => null),
+    )
+  );
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function basket_block_info() {
+  $blocks['basket'] = array(
+    'info' => t('Basket'),
+    'cache' => DRUPAL_NO_CACHE,
+  );
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function basket_block_view($delta = '') {
+  $block = array();
+  switch ($delta) {
+    case 'basket':
+      $block['subject'] = t('My basket');
+      $block['content'] = array(
+        '#theme' => 'block_basket',
+        '#title' => t('My basket'),
+        '#basket' => Basket::get_basket(),
+      );
+      break;
+  }
+  return $block;
+}
+
+/**
+ * Wrapper function to retrieve a basket easily in other modules
+ * @return Basket
+ */
+function basket_get_basket() {
+  return Basket::get_basket();
+}
+
+/**
+ *
+ * @param $object (array('type' => 'node', 'id' => 2))
+ * @param array $config (array('operation' => 'add|remove', 'absolute' => true, 'query' => array('goto' => 'basket')))
+ * @return string
+ */
+function basket_get_url($object, $config = array()) {
+  // Create the GET parameters
+  if (is_array($object)) {
+    $query = array(
+      'type' => $object['type'],
+      'id' => $object['id']
+    );
+  } elseif (is_object($object)) {
+    $query = array(
+      'type' => $object->type,
+      'id' => $object->nid
+    );
+  }
+
+  // Check if we have additional GET-Parameters to consider
+  if (isset($config['query']) && is_array($config['query'])) {
+    $query += $config['query'];
+  }
+  // Create the options for the url-Function
+  $options = array();
+  $options['query'] = $query;
+  $options['absolute'] = isset($config['absolute']) ? $config['absolute'] : true;
+
+  // Check what url-Type we have to return
+  $type = isset($config['operation']) ? $config['operation'] : 'add';
+  switch($type) {
+    case 'add':
+      return url(BASKET_ADD_URL, $options);
+    case 'remove':
+      return url(BASKET_REMOVE_URL, $options);
+    case 'update':
+      return url(BASKET_UPDATE_URL, $options);
+  }
+  return '#';
+}
+
+/**
+ * Handles the add of an element to the view
+ */
+function basket_add_view() {
+  $goto = isset($_GET['goto']) ? $_GET['goto'] : '';
+  if (!isset($_GET['type']) || !isset($_GET['id'])) {
+    $message = t('Error while trying to add a element to the basket: Incorrect URL-Paremters. Please check your URL.');
+    _basket_response(null, 'add', $message, 'error', $goto);
+  }
+  $basket = Basket::get_basket();
+  $object = $basket->add($_GET['type'], $_GET['id']);
+  if ($object === false) {
+    $message = t('The item has not been added to your basket. It is either already in your basket or does not exist.');
+    _basket_response($object, 'add', $message, 'error', $goto);
+  } else {
+    $message = t('@title has been added to your basket', array('@title' => $object->title));
+    _basket_response($object, 'add', $message, 'success', $goto);
+  }
+
+}
+
+/**
+ * Removes an element from the basket
+ */
+function basket_remove_view() {
+  $goto = isset($_GET['goto']) ? $_GET['goto'] : '';
+  if (!isset($_GET['type']) || !isset($_GET['id'])) {
+    $message = t('Error while trying to add a element to the basket: Incorrect URL-Paremters. Please check your URL.');
+    _basket_response(null, 'remove', $message, 'error', $goto);
+  }
+  $basket = Basket::get_basket();
+  $object = $basket->remove($_GET['type'], $_GET['id']);
+  if ($object === false) {
+    $message = t('There was no matching item in your basket.');
+    _basket_response(null, 'remove', $message, 'error', $goto);
+  } else {
+    $message = t('@title has been removed from your basket', array('@title' => $object->title));
+    _basket_response(null, 'remove', $message, 'success', $goto);
+  }
+}
+
+function basket_update_view() {
+  $basket = Basket::get_basket();
+  if (!isset($_POST['basket-amount'])) {
+    $message = t('Nothing changed');
+    _basket_response(null, 'update', $message, 'info', 'basket');
+  }
+  foreach($_POST['basket-amount'] as $key => $value) {
+    $item = $basket->get_by_id($key);
+    $value = intval($value);
+    if ($value >= 100)
+      continue; // Probably a troll so far, I should just make this configurable in the backend
+    if ($value <= 0) {
+      $basket->remove($item->get_type(), $item->get_id());
+    } else {
+      $item->set_amount($value);
+    }
+  }
+  $basket->save();
+  $message = t('Items updated');
+  _basket_response(null, 'update', $message, 'success', 'basket');
+}
+
+/**
+ * Clears the whole basket
+ */
+function basket_clear_view() {
+  $goto = isset($_GET['goto']) ? $_GET['goto'] : '';
+  $basket = new basket();
+  $basket->clear();
+  $message = t('Your basket has been cleared successfully.');
+  _basket_response(null, 'clear', $message, 'success', $goto);
+}
+
+/**
+ * Helperfunction that checks if an item already exists in the basket
+ * @param $type
+ * @param $id
+ * @return bool
+ */
+function basket_item_exists($type, $id) {
+  return Basket::get_basket()->item_exists($type, $id);
+}
+
+
+function _basket_response($object=null, $operation=null, $message=null, $status=null, $redirect=null) {
+  if (isset($_REQUEST['ajax']) && $_REQUEST['ajax'] == '1')
+    _basket_ajax_response($object, $operation, $message, $status, $redirect);
+  _basket_default_response($message, $status, $redirect);
+}
+
+
+function _basket_ajax_response($object, $operation, $message, $status, $redirect) {
+  $response = array(
+    'status' => $status,
+    'message' => $message,
+    'operation' => $operation,
+  );
+  if ($object !== null)
+    $response['object'] = array(
+      'title' => $object->title,
+      'id' => $object->nid
+    );
+  if (drupal_valid_path($redirect))
+    $response['goto'] = $redirect;
+  $json_response = json_encode($response);
+  print $json_response;
+  exit;
+}
+
+/**
+ * Adds an optional message to the drupal message system and redirects the user to the redirect page
+ * @param $message
+ * @param $status
+ * @param $redirect
+ */
+function _basket_default_response($message, $status, $redirect) {
+  if ($message !== null)
+    drupal_set_message($message, $status);
+  _basket_redirect($redirect);
+}
+
+
+function _basket_validate($goto) {
+  // Check if we got a system path
+  $valid = drupal_lookup_path('alias', $goto);
+  if (!$valid)
+    // Check if we got a alias
+    $valid = drupal_lookup_path('source', $goto);
+  // We have something matching
+  if (!$valid)
+    // Check if it is a generally valid path to go and the user has access
+    // THIS WILL NOT PREVENT A REDIRECT TO EXTERNAL PAGES (http://www.google.de is a valid path!)
+    $valid = drupal_valid_path($goto);
+  return $valid;
+}
+
+
+/**
+ * Checks if the goto is valid and redirects to it if it is. Redirects to the frontpage otherwise.
+ * @param $goto
+ */
+function _basket_redirect($goto) {
+  $valid = _basket_validate($goto);
+  if ($valid) {
+    drupal_goto($goto);
+    // The path is invalid, just redirect to the frontpage
+  } else {
+    drupal_goto('');
+  }
+}

@@ -1,0 +1,5 @@
+name = "Basket"
+description = "Gives you the possibility to put nodes into a basket and reder them accordingly"
+
+core = 7.x
+version = "7.x-1.0-alpha1"
